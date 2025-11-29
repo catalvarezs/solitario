@@ -1,34 +1,53 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { RotateCcw, Trophy, Spade } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { RotateCcw, Trophy, Spade, Undo2 } from 'lucide-react';
 import { Card as CardComponent } from './components/Card';
 import { GameState, Position, Card } from './types';
 import { initializeGame, canMoveToFoundation, canMoveToTableau, checkWin } from './services/engine';
 
-// --- Types needed locally ---
-interface Selection {
-  position: Position;
-  cardIndex?: number;
-}
+// --- Helpers ---
 
-// Logo Component
+// Tailwind breakpoints matching
+const getBreakpoint = () => {
+  if (typeof window === 'undefined') return 'md';
+  if (window.innerWidth >= 768) return 'md';
+  if (window.innerWidth >= 640) return 'sm';
+  return 'xs';
+};
+
+// Card heights based on Card.tsx classes (h-16=64, h-24=96, h-36=144)
+const CARD_HEIGHTS = {
+  xs: 64,
+  sm: 96,
+  md: 144
+};
+
+// --- Components ---
+
 const AceLogo = () => (
-  <div className="relative w-8 h-10 bg-neutral-200 rounded sm:rounded-md flex items-center justify-center shadow-lg border border-neutral-400">
-    <span className="absolute top-0.5 left-0.5 text-[8px] leading-none font-bold text-black font-mono">A</span>
-    <Spade size={16} className="text-black fill-current" />
-    <span className="absolute bottom-0.5 right-0.5 text-[8px] leading-none font-bold text-black rotate-180 font-mono">A</span>
+  <div className="relative w-7 h-9 bg-neutral-100 rounded flex items-center justify-center shadow-lg border border-neutral-300">
+    <span className="absolute top-0.5 left-0.5 text-[6px] leading-none font-bold text-black font-mono">A</span>
+    <Spade size={14} className="text-black fill-current" />
+    <span className="absolute bottom-0.5 right-0.5 text-[6px] leading-none font-bold text-black rotate-180 font-mono">A</span>
   </div>
 );
 
+// --- Main App ---
+
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(initializeGame());
-  const [selection, setSelection] = useState<Selection | null>(null);
+  const [selection, setSelection] = useState<{ position: Position; cardIndex?: number } | null>(null);
   const [history, setHistory] = useState<GameState[]>([]);
   const [showWin, setShowWin] = useState(false);
-  const [dimensions, setDimensions] = useState({ height: window.innerHeight });
+  
+  // Layout state
+  const [breakpoint, setBreakpoint] = useState(getBreakpoint());
+  const [windowHeight, setWindowHeight] = useState(typeof window !== 'undefined' ? window.innerHeight : 800);
 
-  // Handle Resize for dynamic calculations
   useEffect(() => {
-    const handleResize = () => setDimensions({ height: window.innerHeight });
+    const handleResize = () => {
+      setBreakpoint(getBreakpoint());
+      setWindowHeight(window.innerHeight);
+    };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
@@ -45,8 +64,10 @@ export default function App() {
     }
   }, [gameState.foundations]);
 
+  // --- Logic ---
+
   const saveToHistory = () => {
-    setHistory(prev => [...prev.slice(-10), JSON.parse(JSON.stringify(gameState))]);
+    setHistory(prev => [...prev.slice(-20), JSON.parse(JSON.stringify(gameState))]);
   };
 
   const undo = () => {
@@ -63,8 +84,6 @@ export default function App() {
     setSelection(null);
     setShowWin(false);
   };
-
-  // --- Actions ---
 
   const handleStockClick = () => {
     saveToHistory();
@@ -98,100 +117,8 @@ export default function App() {
     });
   };
 
-  const handleAttemptMove = (targetPos: Position) => {
-    if (!selection) return;
-
-    const sourcePos = selection.position;
-    
-    if (sourcePos.type === targetPos.type && sourcePos.index === targetPos.index) {
-      setSelection(null);
-      return;
-    }
-
-    let movingCards: Card[] = [];
-    let sourcePile: Card[] = [];
-    
-    if (sourcePos.type === 'waste') {
-      sourcePile = gameState.waste;
-      movingCards = [sourcePile[sourcePile.length - 1]];
-    } else if (sourcePos.type === 'foundation') {
-      sourcePile = gameState.foundations[sourcePos.index];
-      movingCards = [sourcePile[sourcePile.length - 1]];
-    } else if (sourcePos.type === 'tableau') {
-      sourcePile = gameState.tableau[sourcePos.index];
-      const splitIndex = selection.cardIndex !== undefined ? selection.cardIndex : sourcePile.length - 1;
-      movingCards = sourcePile.slice(splitIndex);
-    }
-
-    if (movingCards.length === 0 || !movingCards[0]) {
-      setSelection(null);
-      return;
-    }
-
-    const leadCard = movingCards[0];
-    let validMove = false;
-
-    if (targetPos.type === 'foundation') {
-      if (movingCards.length === 1) {
-        const targetPile = gameState.foundations[targetPos.index];
-        if (canMoveToFoundation(leadCard, targetPile)) {
-          validMove = true;
-        }
-      }
-    } else if (targetPos.type === 'tableau') {
-      const targetPile = gameState.tableau[targetPos.index];
-      if (canMoveToTableau(leadCard, targetPile)) {
-        validMove = true;
-      }
-    }
-
-    if (validMove) {
-      executeMove(sourcePos, targetPos, movingCards);
-    } else {
-      setSelection(null);
-    }
-  };
-
-  const executeMove = (source: Position, target: Position, cards: Card[]) => {
-    saveToHistory();
-    setGameState(prev => {
-      const newStock = [...prev.stock];
-      const newWaste = [...prev.waste];
-      const newFoundations = prev.foundations.map(p => [...p]);
-      const newTableau = prev.tableau.map(p => [...p]);
-
-      if (source.type === 'waste') {
-        newWaste.pop();
-      } else if (source.type === 'foundation') {
-        newFoundations[source.index].pop();
-      } else if (source.type === 'tableau') {
-        const count = cards.length;
-        const pile = newTableau[source.index];
-        pile.splice(pile.length - count, count);
-        if (pile.length > 0 && !pile[pile.length - 1].faceUp) {
-          pile[pile.length - 1].faceUp = true;
-        }
-      }
-
-      if (target.type === 'foundation') {
-        newFoundations[target.index].push(cards[0]);
-      } else if (target.type === 'tableau') {
-        newTableau[target.index].push(...cards);
-      }
-
-      return {
-        ...prev,
-        stock: newStock,
-        waste: newWaste,
-        foundations: newFoundations,
-        tableau: newTableau,
-        moves: prev.moves + 1
-      };
-    });
-    setSelection(null);
-  };
-
   const handleCardClick = (pos: Position, cardIndex?: number) => {
+    // 1. Select source
     if (!selection) {
       let isValidSource = false;
       if (pos.type === 'waste' && gameState.waste.length > 0) isValidSource = true;
@@ -210,6 +137,7 @@ export default function App() {
       return;
     }
 
+    // 2. Deselect if clicking same
     if (selection.position.type === pos.type && selection.position.index === pos.index) {
       if (pos.type === 'tableau') {
         if (selection.cardIndex === cardIndex) {
@@ -222,7 +150,86 @@ export default function App() {
       }
     }
 
+    // 3. Attempt Move
     handleAttemptMove(pos);
+  };
+
+  const handleAttemptMove = (targetPos: Position) => {
+    if (!selection) return;
+    const sourcePos = selection.position;
+    
+    // Gather moving cards
+    let movingCards: Card[] = [];
+    let sourcePile: Card[] = [];
+    
+    if (sourcePos.type === 'waste') {
+      sourcePile = gameState.waste;
+      movingCards = [sourcePile[sourcePile.length - 1]];
+    } else if (sourcePos.type === 'foundation') {
+      sourcePile = gameState.foundations[sourcePos.index];
+      movingCards = [sourcePile[sourcePile.length - 1]];
+    } else if (sourcePos.type === 'tableau') {
+      sourcePile = gameState.tableau[sourcePos.index];
+      const splitIndex = selection.cardIndex !== undefined ? selection.cardIndex : sourcePile.length - 1;
+      movingCards = sourcePile.slice(splitIndex);
+    }
+
+    if (!movingCards.length || !movingCards[0]) {
+      setSelection(null);
+      return;
+    }
+
+    // Validate
+    let validMove = false;
+    if (targetPos.type === 'foundation') {
+      if (movingCards.length === 1) {
+        if (canMoveToFoundation(movingCards[0], gameState.foundations[targetPos.index])) validMove = true;
+      }
+    } else if (targetPos.type === 'tableau') {
+      if (canMoveToTableau(movingCards[0], gameState.tableau[targetPos.index])) validMove = true;
+    }
+
+    if (validMove) {
+      executeMove(sourcePos, targetPos, movingCards);
+    } else {
+      setSelection(null);
+    }
+  };
+
+  const executeMove = (source: Position, target: Position, cards: Card[]) => {
+    saveToHistory();
+    setGameState(prev => {
+      const newStock = [...prev.stock];
+      const newWaste = [...prev.waste];
+      const newFoundations = prev.foundations.map(p => [...p]);
+      const newTableau = prev.tableau.map(p => [...p]);
+
+      // Remove from source
+      if (source.type === 'waste') newWaste.pop();
+      else if (source.type === 'foundation') newFoundations[source.index].pop();
+      else if (source.type === 'tableau') {
+        const count = cards.length;
+        const pile = newTableau[source.index];
+        pile.splice(pile.length - count, count);
+        if (pile.length > 0 && !pile[pile.length - 1].faceUp) {
+          pile[pile.length - 1].faceUp = true;
+        }
+      }
+
+      // Add to target
+      if (target.type === 'foundation') newFoundations[target.index].push(cards[0]);
+      else if (target.type === 'tableau') newTableau[target.index].push(...cards);
+
+      return {
+        ...prev,
+        stock: newStock,
+        waste: newWaste,
+        foundations: newFoundations,
+        tableau: newTableau,
+        moves: prev.moves + 1
+      };
+    });
+    setSelection(null);
   };
 
   const handleDoubleClick = (pos: Position) => {
@@ -238,130 +245,142 @@ export default function App() {
     }
   };
 
-  /**
-   * Helper to calculate the 'top' percentage style for a card in a tableau column.
-   * Compresses the stack if it exceeds the available height.
-   */
-  const getCardOffsetStyle = (pileLength: number, cardIndex: number, faceUp: boolean, cards: Card[]) => {
-    // These values are percentages of the container height
-    const FACE_DOWN_MARGIN = 2; // tighter for face down
-    const FACE_UP_MARGIN = 5;   // standard overlap
-    const CARD_HEIGHT_PERCENT = 18; // Approximate height of a card relative to tableau area (depends on CSS aspect ratio, but used for logic)
-    
-    // Determine max available vertical space (100% of parent)
-    // If the standard stacking exceeds 100%, we squash.
-    
-    // Calculate what the height would be with standard spacing
-    let theoreticalHeight = 0;
-    for(let i=0; i<pileLength; i++) {
-        if (i === 0) {
-             theoreticalHeight += CARD_HEIGHT_PERCENT; 
-        } else {
-            const isPrevFaceUp = cards[i-1].faceUp;
-            theoreticalHeight += isPrevFaceUp ? FACE_UP_MARGIN : FACE_DOWN_MARGIN;
-        }
-    }
-    
-    let scaleFactor = 1;
-    // Buffer to ensure we don't hit exact bottom edge
-    if (theoreticalHeight > 95) {
-        scaleFactor = 95 / theoreticalHeight;
-    }
+  // --- Layout Calculation ---
 
-    // Now calculate position for THIS card
-    let currentTop = 0;
-    for(let i=0; i<cardIndex; i++) {
-        const isPrevFaceUp = cards[i].faceUp;
-        currentTop += (isPrevFaceUp ? FACE_UP_MARGIN : FACE_DOWN_MARGIN) * scaleFactor;
+  // Calculates the positions for a single pile
+  const calculatePileLayout = (pile: Card[]) => {
+    const cardHeight = CARD_HEIGHTS[breakpoint];
+    
+    // Constant Spacing configuration - Tighter (Junta más las cartas)
+    // Face Down: Just a small rim (approx 8%)
+    const FACE_DOWN_OFFSET = Math.max(cardHeight * 0.08, 6); 
+    
+    // Face Up: Just enough to see the corner rank/suit (approx 20% or min 26px)
+    // We prioritize seeing the rank, covering the rest to save space.
+    const FACE_UP_OFFSET = Math.max(cardHeight * 0.20, 26); 
+    
+    let currentHeight = 0;
+    const offsets: number[] = [0];
+    
+    for (let i = 1; i < pile.length; i++) {
+      const prevCard = pile[i - 1];
+      const offset = prevCard.faceUp ? FACE_UP_OFFSET : FACE_DOWN_OFFSET;
+      currentHeight += offset;
+      offsets.push(currentHeight);
     }
     
-    return { top: `${currentTop}%` };
+    const totalHeight = currentHeight + cardHeight;
+    return { positions: offsets, totalHeight };
   };
 
+  // Memoize all pile layouts to calculate container height
+  const { tableauLayouts, maxTableauHeight } = useMemo(() => {
+    const layouts = gameState.tableau.map(pile => calculatePileLayout(pile));
+    const maxHeight = Math.max(...layouts.map(l => l.totalHeight));
+    // Ensure container is at least the available screen space so background looks full
+    const minHeight = Math.max(300, windowHeight - 200); 
+    
+    return { 
+      tableauLayouts: layouts, 
+      maxTableauHeight: Math.max(minHeight, maxHeight) 
+    };
+  }, [gameState.tableau, breakpoint, windowHeight]);
+
   return (
-    <div className="h-full w-full flex flex-col bg-black text-neutral-300 font-sans overflow-hidden">
+    <div className="min-h-screen w-full flex flex-col bg-neutral-950 text-neutral-300 font-sans relative">
       
-      {/* Header */}
-      <div className="h-14 shrink-0 flex items-center justify-between px-4 sm:px-6 bg-neutral-900 border-b border-neutral-800 z-20">
+      {/* Sticky Header */}
+      <div className="sticky top-0 z-50 h-14 shrink-0 flex items-center justify-between px-4 bg-neutral-950/90 border-b border-white/5 backdrop-blur-md shadow-2xl">
         <div className="flex items-center gap-3">
           <AceLogo />
-          <h1 className="text-lg font-bold tracking-widest text-neutral-200 uppercase hidden sm:block">
+          <h1 className="text-sm font-bold tracking-[0.2em] text-neutral-400 uppercase block">
             Solitaire
           </h1>
         </div>
         
-        <div className="flex items-center gap-2 sm:gap-4">
-            <div className="flex flex-col items-end mr-2 sm:mr-4">
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider">Moves</span>
-                <span className="text-sm font-mono text-neutral-200">{gameState.moves}</span>
+        <div className="flex items-center gap-3 sm:gap-6">
+            <div className="flex flex-col items-end">
+                <span className="text-[10px] text-neutral-600 uppercase tracking-wider font-bold">Moves</span>
+                <span className="text-sm font-mono text-neutral-200 leading-none">{gameState.moves}</span>
             </div>
-          <button onClick={undo} disabled={history.length === 0} className="p-2 hover:bg-neutral-800 text-neutral-400 hover:text-white rounded-full transition-colors disabled:opacity-20" title="Undo">
-            <RotateCcw size={18} />
+          <button 
+            onClick={undo} 
+            disabled={history.length === 0} 
+            className="p-2 hover:bg-white/10 text-neutral-400 hover:text-white rounded-full transition-colors disabled:opacity-20 active:scale-95" 
+            title="Undo"
+          >
+            <Undo2 size={20} />
           </button>
-          <button onClick={resetGame} className="px-4 py-1.5 text-xs font-bold bg-neutral-100 text-neutral-900 rounded hover:bg-neutral-300 transition-colors uppercase tracking-wide">
+          <button 
+            onClick={resetGame} 
+            className="px-4 py-1.5 text-[10px] sm:text-xs font-bold bg-neutral-200 text-neutral-900 rounded hover:bg-white transition-colors uppercase tracking-widest shadow-lg active:scale-95"
+          >
             New Game
           </button>
         </div>
       </div>
 
-      {/* Main Game Surface */}
-      <div className="flex-1 w-full max-w-7xl mx-auto p-2 sm:p-4 flex flex-col gap-2 sm:gap-4 h-full relative">
+      {/* Game Board */}
+      <div className="w-full max-w-7xl mx-auto p-2 sm:p-4 flex flex-col gap-1 relative">
         
         {/* Top Section: Stock/Waste & Foundations */}
-        <div className="flex justify-between items-start shrink-0 h-[18vh] min-h-[5rem] max-h-[10rem]">
+        {/* Reduced height to bring tableau closer (minimal buffer for shadows) */}
+        <div className="flex justify-between items-start shrink-0 h-[68px] sm:h-[100px] md:h-[148px]">
           
-          {/* Left: Stock & Waste */}
+          {/* Stock & Waste */}
           <div className="flex gap-2 sm:gap-4 h-full">
-            {/* Stock */}
-            <div className="relative aspect-[2/3] h-full">
+            <div className="relative">
                {gameState.stock.length > 0 ? (
-                  <CardComponent 
-                    onClick={handleStockClick}
-                    className="h-full w-auto hover:brightness-110 shadow-lg" 
-                  />
+                  <div className="relative">
+                      {/* Fake stack effect for depth */}
+                      {gameState.stock.length > 1 && (
+                         <div className="absolute top-1 left-1 w-full h-full rounded-md bg-neutral-800 border border-neutral-700" />
+                      )}
+                      <CardComponent 
+                        onClick={handleStockClick}
+                        className="hover:brightness-110 shadow-xl" 
+                      />
+                  </div>
                ) : (
                   <div 
                     onClick={handleStockClick}
-                    className="h-full w-full rounded-md border-2 border-dashed border-neutral-800 flex items-center justify-center cursor-pointer hover:border-neutral-600 hover:bg-neutral-900 transition-colors group"
+                    className="w-12 h-16 sm:w-16 sm:h-24 md:w-24 md:h-36 rounded-md border-2 border-dashed border-neutral-800 flex items-center justify-center cursor-pointer hover:border-neutral-600 hover:bg-white/5 transition-all group"
                   >
-                    <RotateCcw size={24} className="text-neutral-700 group-hover:text-neutral-500" />
+                    <RotateCcw size={20} className="text-neutral-700 group-hover:text-neutral-500" />
                   </div>
                )}
             </div>
 
-            {/* Waste */}
-            <div className="relative aspect-[2/3] h-full">
-              {gameState.waste.length > 0 ? (
+            <div className="relative">
+              {gameState.waste.length > 0 && (
                 <CardComponent 
                   card={gameState.waste[gameState.waste.length - 1]} 
                   onClick={() => handleCardClick({ type: 'waste', index: 0 })}
                   onDoubleClick={() => handleDoubleClick({ type: 'waste', index: 0 })}
                   selected={selection?.position.type === 'waste'}
-                  className="h-full w-auto shadow-lg"
+                  className="shadow-xl"
                 />
-              ) : (
-                <div className="h-full w-full rounded-md border border-neutral-900 bg-neutral-900/30" />
               )}
             </div>
           </div>
 
-          {/* Right: Foundations */}
+          {/* Foundations */}
           <div className="flex gap-2 sm:gap-4 h-full">
             {gameState.foundations.map((pile, i) => (
-              <div key={`foundation-${i}`} className="relative aspect-[2/3] h-full">
+              <div key={`foundation-${i}`} className="relative">
                 {pile.length > 0 ? (
                   <CardComponent 
                     card={pile[pile.length - 1]} 
                     onClick={() => handleCardClick({ type: 'foundation', index: i })}
                     selected={selection?.position.type === 'foundation' && selection.position.index === i}
-                    className="h-full w-auto shadow-lg"
+                    className="shadow-xl"
                   />
                 ) : (
                   <CardComponent 
                     isPlaceholder 
                     placeholderContent={['♥', '♦', '♣', '♠'][i]} 
                     onClick={() => handleCardClick({ type: 'foundation', index: i })}
-                    className="h-full w-auto border-neutral-800 bg-neutral-900/20 opacity-50"
+                    className="border-neutral-800 bg-neutral-900/40 opacity-40 hover:opacity-60"
                   />
                 )}
               </div>
@@ -369,70 +388,79 @@ export default function App() {
           </div>
         </div>
 
-        {/* Bottom Section: Tableau */}
-        <div className="flex-1 flex justify-between items-stretch gap-1 sm:gap-2 relative min-h-0 pt-2 border-t border-neutral-800/50">
-          {gameState.tableau.map((pile, pileIndex) => (
-            <div key={`tableau-${pileIndex}`} className="flex-1 relative h-full">
-              
-              {/* Hit area for empty column */}
-              <div 
-                className={`absolute inset-0 z-0 rounded-lg transition-colors ${pile.length === 0 ? 'bg-neutral-900/30 border border-neutral-800/30 hover:bg-neutral-900/50' : ''}`}
-                onClick={() => pile.length === 0 && handleCardClick({ type: 'tableau', index: pileIndex })}
-              />
-              
-              {/* Cards in column */}
-              {pile.map((card, cardIndex) => {
-                const isSelected = selection?.position.type === 'tableau' && 
-                                   selection.position.index === pileIndex && 
-                                   selection.cardIndex === cardIndex;
-                
-                // Dynamic styling for squishing
-                const style = getCardOffsetStyle(pile.length, cardIndex, card.faceUp, pile);
+        {/* Tableau */}
+        <div 
+          className="flex justify-between gap-1 relative border-t border-white/5 pt-1 transition-[height] duration-200"
+          style={{ height: maxTableauHeight + 40 }} // Add buffer for bottom selection
+        >
+          {gameState.tableau.map((pile, pileIndex) => {
+            const layout = tableauLayouts[pileIndex];
 
-                return (
-                  <div 
-                    key={card.id} 
-                    className="absolute w-full transition-[top] duration-300 ease-out"
-                    style={{ 
-                      ...style,
-                      zIndex: cardIndex + 1,
-                      height: '18vh', // Match approximate logic height
-                      maxHeight: '10rem', // Cap max height for large screens
-                      minHeight: '3.5rem' // Ensure visible on tiny screens
-                    }}
-                  >
-                    <div className="relative w-full h-full aspect-[2/3] mx-auto">
-                        <CardComponent 
-                        card={card}
-                        selected={isSelected}
-                        onClick={() => handleCardClick({ type: 'tableau', index: pileIndex }, cardIndex)}
-                        onDoubleClick={() => handleDoubleClick({ type: 'tableau', index: pileIndex })}
-                        className="w-full h-full"
-                        />
+            return (
+              <div key={`tableau-${pileIndex}`} className="flex-1 relative h-full">
+                
+                {/* Empty Pile Click Area */}
+                <div 
+                  className="absolute top-0 left-0 w-full h-32 z-0 cursor-pointer group"
+                  onClick={() => pile.length === 0 && handleCardClick({ type: 'tableau', index: pileIndex })}
+                >
+                   {pile.length === 0 && (
+                       <div className="mx-auto w-12 h-16 sm:w-16 sm:h-24 md:w-24 md:h-36 rounded-md border border-neutral-800/50 bg-neutral-900/20 group-hover:bg-neutral-900/40 transition-colors" />
+                   )}
+                </div>
+
+                {/* Cards */}
+                {pile.map((card, cardIndex) => {
+                  const isSelected = selection?.position.type === 'tableau' && 
+                                     selection.position.index === pileIndex && 
+                                     selection.cardIndex === cardIndex;
+                  
+                  const topPx = layout.positions[cardIndex];
+                  
+                  return (
+                    <div 
+                      key={card.id}
+                      className="absolute w-full left-0 pointer-events-none"
+                      style={{ 
+                        top: `${topPx}px`,
+                        zIndex: cardIndex + 1,
+                      }}
+                    >
+                      {/* Inner wrapper to center card horizontally in column and enable pointer events on card only */}
+                      <div className="flex justify-center w-full pointer-events-auto">
+                          <CardComponent 
+                              card={card}
+                              selected={isSelected}
+                              onClick={() => handleCardClick({ type: 'tableau', index: pileIndex }, cardIndex)}
+                              onDoubleClick={() => handleDoubleClick({ type: 'tableau', index: pileIndex })}
+                              className="shadow-md hover:shadow-lg"
+                          />
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
       </div>
 
       {/* Win Overlay */}
       {showWin && (
-        <div className="absolute inset-0 bg-black/90 flex items-center justify-center z-50 backdrop-blur-md">
-          <div className="bg-neutral-900 p-8 rounded-2xl border border-neutral-800 text-center shadow-2xl w-full max-w-sm mx-4">
-            <Trophy size={64} className="mx-auto text-yellow-500 mb-6" />
-            <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Victory!</h2>
-            <div className="w-16 h-1 bg-neutral-800 mx-auto mb-4 rounded-full"></div>
-            <p className="text-neutral-400 mb-8 uppercase tracking-widest text-sm">
-              Solved in <span className="text-white font-mono text-lg ml-1">{gameState.moves}</span> moves
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm animate-in fade-in duration-500">
+          <div className="bg-neutral-900 p-10 rounded-xl border border-neutral-800 text-center shadow-2xl w-full max-w-sm mx-4 transform transition-all hover:scale-105">
+            <div className="w-20 h-20 bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+                <Trophy size={40} className="text-yellow-500" />
+            </div>
+            <h2 className="text-4xl font-bold text-white mb-2 tracking-tighter">VICTORY</h2>
+            <p className="text-neutral-500 mb-8 font-mono text-sm">
+              Solved in {gameState.moves} moves
             </p>
             <button 
               onClick={resetGame}
-              className="w-full py-4 bg-white text-black font-bold rounded-lg hover:bg-neutral-200 transition-all active:scale-95"
+              className="w-full py-3 bg-white text-black font-bold rounded hover:bg-neutral-200 transition-colors uppercase tracking-widest text-sm"
             >
-              PLAY AGAIN
+              Play Again
             </button>
           </div>
         </div>

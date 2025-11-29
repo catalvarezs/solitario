@@ -60,7 +60,7 @@ export const Card: React.FC<CardProps> = ({
           relative w-12 h-16 sm:w-16 sm:h-24 md:w-24 md:h-36 
           bg-card-back rounded-md shadow-sm border border-neutral-800
           flex items-center justify-center overflow-hidden cursor-pointer
-          transition-transform hover:brightness-110 active:scale-95
+          transition-transform hover:brightness-110
           ${className}
         `}
       >
